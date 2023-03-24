@@ -32,14 +32,17 @@ CONNECTION_ERROR = ('Ошибка ресурса, {error}.'
                     'Параметры запроса: {endpoint}, {headers}, {params}'
                     )
 CONNECTION_WRONG_CODE = ('API вернул код, отличный от 200.'
+                         'Код возврата: {code}.'
                          'Параметры запроса: {endpoint}, {headers}, {params}')
 ERROR = 'Сбой в работе программы: {error}'
 FIRST_MESSAGE = 'Поехали проверять домашку!'
 JSON_ERROR = ('Ошибка декодирования {error}.'
               'Параметры запроса: {endpoint}, {headers}, {params}')
-KEY_ERROR = ('Отсутствует необходимый ключ {key}. Отказано в обслуживании.'
-             'Параметры запроса: {endpoint}, {headers}, {params}')
+KEY_ERROR = 'Отсутствует необходимый ключ {key}.'
 KEY_API = 'Нет ожидаемого ключа {key} в ответе API.'
+RESPONSE_JSON_ERROR = ('Отсутствует необходимый ключ {key}.'
+                       'Значение из JSON: {value}.'
+                       'Параметры запроса: {endpoint}, {headers}, {params}')
 SEND_MESSAGE_ERROR = 'Сообщение {message} не отправлено, ошибка: {error}'
 SEND_MESSAGE_SUCCESS = 'Сообщение отправлено: {message}'
 STATUS = 'Статус {status} неизвестен'
@@ -60,7 +63,7 @@ def check_tokens():
     ]
     if empty_tokens:
         logger.critical(TOKEN_IS_ABSENT.format(token=empty_tokens))
-        raise AttributeError(TOKEN_ERROR_MESSAGE.format(token=empty_tokens))
+        raise MemoryError(TOKEN_ERROR_MESSAGE.format(token=empty_tokens))
 
 
 def send_message(bot, message):
@@ -68,35 +71,39 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logger.debug(SEND_MESSAGE_SUCCESS.format(message=message))
+        return True
     except TelegramError as error:
         logger.exception(
             SEND_MESSAGE_ERROR.format(message=message, error=error))
+        return False
 
 
 def get_api_answer(timestamp):
     """Запрос к единственному эндпоинту API-сервиса."""
     params = {'from_date': timestamp}
-    response_dictionary = dict(
-        endpoint=ENDPOINT, headers=HEADERS, params=params)
+    request = dict(
+        url=ENDPOINT, headers=HEADERS, params=params)
     try:
         response = requests.get(
-            **response_dictionary
+            **request
         )
     except requests.RequestException as error:
         raise ConnectionError(CONNECTION_ERROR.format(
             error=error,
-            **response_dictionary,
+            **request,
         ))
     if response.status_code != HTTPStatus.OK:
         raise ValueError(CONNECTION_WRONG_CODE.format(
-            **response_dictionary,
+            code=response.status_code,
+            **request,
         ))
     response_json = response.json()
     for key in ['error', 'code']:
-        if response_json.get(key, None):
-            raise LookupError(KEY_ERROR.format(
+        if key in response_json:
+            raise ValueError(RESPONSE_JSON_ERROR.format(
                 key=key,
-                **response_dictionary,))
+                value=response_json.get(key),
+                **request,))
     return response_json
 
 
@@ -136,9 +143,10 @@ def main():
             response = get_api_answer(timestamp)
             homeworks = check_response(response)
             if homeworks:
-                send_message(bot, parse_status(homeworks[0]))
+                if send_message(bot, parse_status(homeworks[0])):
+                    timestamp = response.get('current_date', timestamp)
         except Exception as error:
-            logger.error(ERROR.format(error=error))
+            send_message(bot, ERROR.format(error=error))
         finally:
             time.sleep(RETRY_PERIOD)
 
