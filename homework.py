@@ -144,8 +144,8 @@ def main():
             if homeworks and send_message(bot, parse_status(homeworks[0])):
                 timestamp = response.get('current_date', timestamp)
         except Exception as error:
-            if last_error != error:
-                send_message(bot, ERROR.format(error=error))
+            if (last_error != error
+                    and send_message(bot, ERROR.format(error=error))):
                 last_error = error
             logger.error(ERROR.format(error=error))
         finally:
